@@ -8,28 +8,41 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/spf13/afero"
 )
 
 // An OS abstracts functions in the standard library's os package.
 type OS interface {
-	Lstat(name string) (os.FileInfo, error)
-	Open(name string) (*os.File, error)
+	afero.Fs
+
+	Lstat(name string) (info os.FileInfo, err error)
 	PathSeparator() rune
-	Stat(name string) (os.FileInfo, error)
+}
+
+// AferoOS maks an afero filesystem OS interface compatible
+type AferoOS struct {
+	afero.Fs
+}
+
+// Lstat stats a link target
+func (os *AferoOS) Lstat(name string) (info os.FileInfo, err error) {
+	if ls, ok := os.Fs.(afero.Lstater); ok {
+		info, _, err = ls.LstatIfPossible(name)
+		return
+	}
+
+	return os.Stat(name)
+}
+
+// PathSeparator is the rune separating paths
+func (os *AferoOS) PathSeparator() rune {
+	return filepath.Separator
 }
 
 // StandardOS is a value that implements the OS interface by calling functions
 // in the standard libray's os package.
-var StandardOS OS = standardOS{}
-
-// A standardOS implements OS by calling functions in the standard library's os
-// package.
-type standardOS struct{}
-
-func (standardOS) Lstat(name string) (os.FileInfo, error) { return os.Lstat(name) }
-func (standardOS) Open(name string) (*os.File, error)     { return os.Open(name) }
-func (standardOS) PathSeparator() rune                    { return os.PathSeparator }
-func (standardOS) Stat(name string) (os.FileInfo, error)  { return os.Stat(name) }
+var StandardOS OS = &AferoOS{afero.NewOsFs()}
 
 // ErrBadPattern indicates a pattern was malformed.
 var ErrBadPattern = path.ErrBadPattern
@@ -665,9 +678,9 @@ func matchComponent(pattern, name string) ([]string, error) {
 		if zeroLength {
 			if slashIdx == -1 {
 				return []string{}, nil
-			} else {
-				return []string{pattern[slashIdx+1:]}, nil
 			}
+
+			return []string{pattern[slashIdx+1:]}, nil
 		}
 	}
 	return nil, nil
